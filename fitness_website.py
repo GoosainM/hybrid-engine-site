@@ -1,48 +1,32 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
-import pandas as pd
+import requests
 from datetime import datetime
 
 # =========================================================
-# 1. THE DATA PIPELINE (Cloud Sheets Configuration)
+# 1. THE DATA PIPELINE (Direct Web Entry Protocol)
 # =========================================================
-# Establish a secure connection to your cloud data sheet
-conn = st.connection("gsheets", type=GSheetsConnection)
 
-def save_lead_to_cloud(name, email, goal):
-    """Safely appends a new biometric profile to the Google Sheet dataset."""
-    try:
-        # Read the current live sheet data safely (ttl=0 ensures no cached/stale data)
-        existing_data = conn.read(worksheet="Sheet1", ttl=0)
-    except Exception:
-        # If the sheet is completely blank and has no columns yet, start fresh
-        existing_data = pd.DataFrame(columns=["Name", "Email", "Goal", "Date"])
+# Your verified custom Google Form submission endpoint
+FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSdrFuod7p5mI9aAo5CJSU5JzM21HLiFJ-N-SwQou6hO4QQe3A/formResponse"
 
-    # Clean the incoming parameters
-    email_clean = email.strip().lower()
-    name_clean = name.strip()
-
-    # Check for duplicate entries in the data frame array
-    if not existing_data.empty and email_clean in existing_data["Email"].values:
-        return False, "This email address is already registered on our client roster!"
-
-    # Create a new data frame row matching the exact schema
-    new_lead = pd.DataFrame([{
-        "Name": name_clean,
-        "Email": email_clean,
-        "Goal": goal,
-        "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }])
-
-    # Concatenate the new data row to our existing master table
-    updated_df = pd.concat([existing_data, new_lead], ignore_index=True)
+def save_lead_to_cloud_direct(name, email, goal):
+    """Safely streams intake data straight to the Google ecosystem via web payloads."""
+    # Your verified form field parameter entry keys
+    payload = {
+        "entry.1425746167": name.strip(),         # Full Name Entry ID
+        "entry.1131361775": email.strip().lower(), # Email Address Entry ID
+        "entry.3775637": goal                      # Athletic Target Entry ID
+    }
     
     try:
-        # Push the updated master table back to the cloud sheet node
-        conn.update(worksheet="Sheet1", data=updated_df)
-        return True, "Success"
-    except Exception as e:
-        return False, "An error occurred connecting to the cloud storage layer."
+        # Fire a secure, standalone HTTP POST request straight to the form server endpoint
+        response = requests.post(FORM_URL, data=payload)
+        if response.status_code == 200:
+            return True, "Success"
+        else:
+            return False, "Cloud pipeline rejected data packet transaction."
+    except Exception:
+        return False, "Failed to establish handshake with cloud web target."
 
 
 # =========================================================
@@ -109,7 +93,7 @@ with st.expander("Open Interactive Macro Calculator", expanded=False):
         "Heavy Athlete Training": 1.725
     }
 
-    # Execute Data Analyst Logic
+    # Execute Calculations
     bmr = (10 * weight) + (6.25 * height) - (5 * age) + 5
     tdee = int(bmr * activity_multipliers[activity])
     
@@ -157,8 +141,8 @@ if submit_btn:
     if not name_input or not email_input:
         st.error("Please fill out both your name and email to proceed.")
     else:
-        # Trigger the cloud data pipeline process
-        success, message = save_lead_to_cloud(name_input, email_input, goal_selection)
+        # Trigger the clean, unified web payload pipeline
+        success, message = save_lead_to_cloud_direct(name_input, email_input, goal_selection)
         if success:
             st.success(f"Success! Thank you {name_input}, your training goals have been securely logged.")
         else:
