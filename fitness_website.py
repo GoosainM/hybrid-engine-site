@@ -1,27 +1,49 @@
 import streamlit as st
-import sqlite3
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
 from datetime import datetime
 
 # =========================================================
-# 1. THE DATA BASEMENT (Backend Storage Setup)
+# 1. THE DATA PIPELINE (Cloud Sheets Configuration)
 # =========================================================
-def init_database():
-    """Creates a local secure file to store our fitness leads."""
-    connection = sqlite3.connect("fitness.db")
-    cursor = connection.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS registrations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            client_name TEXT NOT NULL,
-            client_email TEXT NOT NULL UNIQUE,
-            fitness_goal TEXT NOT NULL,
-            submission_date TEXT NOT NULL
-        )
-    """)
-    connection.commit()
-    connection.close()
+# Establish a secure connection to your cloud data sheet
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-init_database()
+def save_lead_to_cloud(name, email, goal):
+    """Safely appends a new biometric profile to the Google Sheet dataset."""
+    try:
+        # Read the current live sheet data safely (ttl=0 ensures no cached/stale data)
+        existing_data = conn.read(worksheet="Sheet1", ttl=0)
+    except Exception:
+        # If the sheet is completely blank and has no columns yet, start fresh
+        existing_data = pd.DataFrame(columns=["Name", "Email", "Goal", "Date"])
+
+    # Clean the incoming parameters
+    email_clean = email.strip().lower()
+    name_clean = name.strip()
+
+    # Check for duplicate entries in the data frame array
+    if not existing_data.empty and email_clean in existing_data["Email"].values:
+        return False, "This email address is already registered on our client roster!"
+
+    # Create a new data frame row matching the exact schema
+    new_lead = pd.DataFrame([{
+        "Name": name_clean,
+        "Email": email_clean,
+        "Goal": goal,
+        "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }])
+
+    # Concatenate the new data row to our existing master table
+    updated_df = pd.concat([existing_data, new_lead], ignore_index=True)
+    
+    try:
+        # Push the updated master table back to the cloud sheet node
+        conn.update(worksheet="Sheet1", data=updated_df)
+        return True, "Success"
+    except Exception as e:
+        return False, "An error occurred connecting to the cloud storage layer."
+
 
 # =========================================================
 # 2. THE VISUAL STOREFRONT (Frontend Layout)
@@ -38,7 +60,7 @@ st.write(
 )
 st.markdown("---")
 
-# --- CORE SERVICES (Tier 2: Style 1) ---
+# --- CORE SERVICES ---
 st.header("Training Pillars")
 col1, col2 = st.columns(2)
 
@@ -79,7 +101,7 @@ with st.expander("Open Interactive Macro Calculator", expanded=False):
             ["Sedentary", "Lightly Active (1-3 days/wk)", "Moderately Active (3-5 days/wk)", "Heavy Athlete Training"]
         )
 
-    # Activity multiplier dictionary (Mifflin-St Jeor Constants)
+    # Activity multiplier dictionary
     activity_multipliers = {
         "Sedentary": 1.2,
         "Lightly Active (1-3 days/wk)": 1.375,
@@ -87,11 +109,10 @@ with st.expander("Open Interactive Macro Calculator", expanded=False):
         "Heavy Athlete Training": 1.725
     }
 
-    # Execute Data Analyst Logic (Mifflin-St Jeor Formula)
+    # Execute Data Analyst Logic
     bmr = (10 * weight) + (6.25 * height) - (5 * age) + 5
     tdee = int(bmr * activity_multipliers[activity])
     
-    # Target distribution math based on selected fitness objective
     if fitness_target == "Performance Muscle Gain":
         target_calories = tdee + 300
         protein = weight * 2.2  
@@ -113,7 +134,7 @@ with st.expander("Open Interactive Macro Calculator", expanded=False):
 
 st.markdown("---")
 
-# --- REGISTRATION INTAKE FORM (Tier 3: Example A) ---
+# --- REGISTRATION INTAKE FORM ---
 st.header("Submit Your Biometric Profile")
 st.write("Fill out your details below to lock in your initial fitness consultation or receive elite training updates.")
 
@@ -136,20 +157,12 @@ if submit_btn:
     if not name_input or not email_input:
         st.error("Please fill out both your name and email to proceed.")
     else:
-        try:
-            conn = sqlite3.connect("fitness.db")
-            curr = conn.cursor()
-            curr.execute(
-                "INSERT INTO registrations (client_name, client_email, fitness_goal, submission_date) VALUES (?, ?, ?, ?)",
-                (name_input.strip(), email_input.strip().lower(), goal_selection, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            )
-            conn.commit()
-            conn.close()
+        # Trigger the cloud data pipeline process
+        success, message = save_lead_to_cloud(name_input, email_input, goal_selection)
+        if success:
             st.success(f"Success! Thank you {name_input}, your training goals have been securely logged.")
-        except sqlite3.IntegrityError:
-            st.error("This email address is already registered on our client roster!")
-        except Exception as e:
-            st.error("An internal system error occurred saving your data.")
+        else:
+            st.error(message)
 
 st.markdown("---")
 
